@@ -1,0 +1,104 @@
+let 
+doc = 
+  [
+    Documentation.Api = "https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-fields/#api-rest-api-3-field-get",
+    Documentation.Name =  "Get JIRA Field Names", 
+    Documentation.FunctionName = "Jira.GetFieldLabelsByFieldId",
+    Documentation.Description = "This function is a jira specific pattern, which retrieves the user friendly field names based o nthe internal field names. Ensure you modify your domain(s) to suit your specific requirements. ", 
+    Documentation.Examples = {
+          [
+            Description = "Retrieve names for default columns only",
+            Code = "FunctionName(Source[DomainColumn])",
+            Result = "Six columns are returned (all internal field names for the projects (keys), the labels (name), and all, navigable, searchable and orderable fields (logical values indicating if the field is also navigable,searchable and orderable (respectively)), i.e. *all, *navigable, *searchable and *orderable"
+          ],
+          [
+            Description = "Retrieve names for default columns and field selection two additional columns",
+            Code = "FunctionName(Source[DomainColumn],{""description and parent only"",""everything apart from description""},{{""description"",""parent""},{""*all"",""-description""}})",
+            Result = "Eight columns are returned (all internal field names for the projects (keys), the labels (name), and all, navigable, searchable and orderable fields (logical values indicating if the field is also navigable,searchable and orderable (respectively)), i.e. *all, *navigable, *searchable and *orderable as well as a column 'description and parent only' with only those 2 fields set to true and a column 'everything apart from description' with only description set to false"
+          ]
+	}
+  ],
+fn = (domains as list, optional columnNames as nullable list, optional fieldList as nullable list) =>
+let
+    // Default values if columnNames or fieldList are null
+    columnNames = if columnNames = null then {} else columnNames,
+    fieldList = if fieldList = null then {} else fieldList,
+
+    #"Get all labels" = let 
+        domainList = domains in Table.Distinct(Table.ExpandRecordColumn(Table.FromList(
+            List.Generate(()=>[i=0],each [i]<List.Count(domainList), each [i=[i]+1], each  
+                if domainList{[i]} = "<domain>" 
+                then 
+                    Json.Document(
+                        Web.Contents(
+                            "<domain>",
+                            [RelativePath = "/rest/api/3/field"]))
+                else 
+                    null){0},
+            Splitter.SplitByNothing(), null, null, ExtraValues.Error), "Column1",{"key", "name","navigable","searchable","orderable"})),
+
+    createTable = List.Accumulate(List.Zip({fieldList, columnNames}), #"Get all labels", (state, currentPair) => let
+        currentFieldList = currentPair{0},
+        currentColumnName = currentPair{1},
+
+        #"get inclusions and exclusions" = 
+            Table.RemoveColumns(
+                Table.AddColumn(
+                    Table.AddColumn(
+                        Table.FromList(
+                            List.Distinct(currentFieldList), 
+                            Splitter.SplitByNothing(), null, null, ExtraValues.Error)
+                        , "include", 
+                        each if Text.StartsWith([Column1],"-") then false else true), "fieldnames", each 
+                        if Text.StartsWith([Column1],"-") 
+                        then Text.RemoveRange([Column1],0) 
+                        else [Column1]),
+                {"Column1"}),
+
+        #"inclusions only" = Table.SelectRows(#"get inclusions and exclusions", each ([include] = true))[fieldnames],
+        #"exclusions only" = Table.SelectRows(#"get inclusions and exclusions", each ([include] = false))[fieldnames],
+        #"full table" = state[key],
+        #"Navigation Only table" = Table.SelectRows(state, each ([navigable] = true))[key],
+        #"Exclude Navigation table" = Table.SelectRows(state, each ([navigable] = false))[key],
+
+        #"create list" = 
+            if  (List.Contains(currentFieldList,"*all") = true and List.Count(currentFieldList) = 1) or List.Count(currentFieldList) = 0 then #"full table" else /*all fields*/
+            if  List.Contains(currentFieldList,"*navigable") = true and List.Count(currentFieldList) = 1 then #"Navigation Only table" else /*nav only fields*/
+            if  (List.Contains(currentFieldList,"-*navigable") = true and List.Count(currentFieldList) = 1) or 
+                (List.ContainsAll(currentFieldList,{"*all", "-*navigable"}) = true and List.Count(currentFieldList) = 2) then #"Exclude Navigation table" else /*non-nav fields*/
+            if  List.ContainsAny(currentFieldList,{"*all","*navigable","-*navigable"}) = false and List.Count(currentFieldList) > 0 then 
+                if List.Count(#"exclusions only") > 0 
+                then List.RemoveItems(#"inclusions only",#"exclusions only") 
+                else #"inclusions only" else /*field list only*/    
+            if  List.Contains(currentFieldList,"*navigable") = true and 
+                List.ContainsAny(currentFieldList,{"-*navigable","*all"}) = false
+                and List.Count(currentFieldList) > 1 then 
+                if List.Count(#"exclusions only") > 0 
+                then List.RemoveItems( List.Combine({#"Navigation Only table",#"inclusions only"}), #"exclusions only")
+                else List.Combine({#"Navigation Only table",#"inclusions only"}) else /*navigable with inclusions and exclusions*/ 
+            if  List.Contains(currentFieldList,"*all") = true and 
+                List.ContainsAny(currentFieldList,{"-*navigable","*navigable"}) = false
+                and List.Count(currentFieldList) > 1 then 
+                if List.Count(#"exclusions only") > 0 
+                then List.RemoveItems( #"full table",#"exclusions only") else #"full table" else /*all with exclusions - inclusions will have no impact*/  
+            if  List.ContainsAll(currentFieldList,{"*all","-*navigable"}) = true and 
+                List.ContainsAny(currentFieldList,{"*navigable"}) = false
+                and List.Count(currentFieldList) > 1 then 
+                if List.Count(#"exclusions only") > 0 
+                then List.RemoveItems( List.Combine(#"Exclude Navigation table",#"inclusions only"), #"exclusions only")
+                else  List.Combine(#"Exclude Navigation table",#"inclusions only") /*excl nav withinclusions and  exclusions*/  
+            else currentFieldList
+
+        in Table.Join(
+            state, 
+            "key",Table.AddColumn(Table.RenameColumns(Table.FromList(#"create list", Splitter.SplitByNothing(), null, null, ExtraValues.Error), {"Column1", "key."& currentColumnName}), currentColumnName, each true), 
+            "key."& currentColumnName, JoinKind.LeftOuter) 
+    ),
+
+    cleanup = Table.ReplaceValue(Table.RemoveColumns(createTable, List.Select(Table.ColumnNames(createTable), each Text.StartsWith(_, "key."))), null, false, Replacer.ReplaceValue, Table.ColumnNames(Table.RemoveColumns(createTable, List.Select(Table.ColumnNames(createTable), each Text.StartsWith(_, "key."))))),
+    addAll = Table.AddColumn(cleanup, "all", each true),
+    Reorder = Table.ReorderColumns(addAll, List.InsertRange(List.RemoveItems(Table.ColumnNames(addAll), {"all"}), List.PositionOf(Table.ColumnNames(addAll), "name") + 1, {"all"}))
+in
+    Reorder
+ in 
+Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))

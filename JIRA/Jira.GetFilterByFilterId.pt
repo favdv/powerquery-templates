@@ -1,0 +1,36 @@
+let 
+doc = 
+  [
+    Documentation.Api = "https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-filters/#api-rest-api-3-filter-id-get",
+    Documentation.Name =  "Get JIRA Filter by Filter Id", 
+    Documentation.FunctionName = "Jira.GetFilterByFilterId",
+    Documentation.Description = "This function is a jira specific pattern, which retrieves the filter for specific filter ids. Ensure you modify your domain(s) to suit your specific requirements.", 
+    Documentation.Examples = {
+          [
+            Description = "Retrieve Filter Ids with specified column name",
+            Code = "FunctionName(Source, ""DomainColumn"",""FilterId"",""Filter"")",
+            Result = "A new column 'Filter' is added with the filter Id for value combination the specified columns"
+          ],
+          [
+            Description = "Retrieve Filter Ids with default column name",
+            Code = "FunctionName(Source, ""DomainColumn"",""FilterId"")",
+            Result = "A new column 'jql' (default column name) is added with the filter for value combination the specified columns"
+          ]
+	}
+  ],
+fn = (previousStep as table, Domains as text, FilterIds as text, optional NewFilterColumnName as nullable text)=>
+let NewFilterColumnName = if NewFilterColumnName = null then "jql" else NewFilterColumnName in 
+	Table.ExpandRecordColumn(
+	    Table.AddColumn(previousStep, NewFilterColumnName, each 
+	      if Text.From( Record.Field(_,Domains)) = "<domain>" 
+	      then 
+		    Json.Document(Web.Contents(
+	          "<domain>",
+	          [RelativePath = "/rest/api/3/filter/" &Text.From( Record.Field(_,FilterIds))]
+	        )) 
+	      else null
+	    ), NewFilterColumnName, {"jql"}, {NewFilterColumnName}
+      )
+
+ in 
+Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))

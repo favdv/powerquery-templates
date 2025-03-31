@@ -1,0 +1,57 @@
+let 
+doc = 
+  [
+    Documentation.Api = "https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-get",
+    Documentation.Name =  "Get JIRA Fields by Key", 
+    Documentation.FunctionName =  "Jira.GetFieldsByKey", 
+    Documentation.Description = "This function is a jira specific pattern, which retrieves the selected JIRA fields for specific keys. Ensure you modify your domain(s) to suit your specific requirements.", 
+    Documentation.Examples = {
+          [
+            Description = "Retrieve Fields for specific keys",
+            Code = "FunctionName(Source, ""DomainColumn"",""keys"",{""description"",""parent""})",
+            Result = "The description and parent fields are retrieved for the keys specified in the keys column."
+          ],
+          [
+            Description = "Retrieve Fields identified in a string parameter for specific keys",
+            Code = "FunctionName(Source, ""DomainColumn"",""keys"",Text.Split(#""Fields to retrieve"","",""))",
+            Result = "The fields as specified in the 'Fields to retrieve' text parameter are retrieved for the keys specified in the keys column. For example, the parameter holds the following fields: parent,issuetype,priority "
+          ]
+	}
+  ],
+fn = (previousStep as table, Domains as text,keys as text,fieldsToRetrieve as list)=> 
+Table.ExpandRecordColumn(
+    Table.ExpandListColumn(
+        Table.ExpandRecordColumn(
+            Table.AddColumn(previousStep, "keys", each 
+                if Record.Field(_,Domains) = "<domain>" 
+                then  
+                    Json.Document(
+                        Web.Contents(
+                            "<domain>",
+                            [
+                                RelativePath = "rest/api/3/search/",
+                                Query = [
+                                    jql="key IN (" & Record.Field(_,keys) &")", 
+                                    fields = Text.Combine( fieldsToRetrieve,","),
+                                    expand="renderedFields",
+                                    maxResults = 
+                                        Text.From(
+                                            List.Max( 
+                                                Table.AddColumn(
+                                                    Table.FromList(Table.Column(previousStep,keys),Splitter.SplitByNothing(), null, null, ExtraValues.Error), 
+                                                    "Custom", 
+                                                    each List.Count(Text.Split([Column1],",")))[Custom]
+                                            )
+                                        ) 
+                                ]
+                            ]
+                        )
+                    )
+                else null
+            ), "keys", {"issues"}
+        ), "issues"
+    ), "issues", {"key", "renderedFields", "fields"}
+)
+ in 
+Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))
+

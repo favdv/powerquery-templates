@@ -1,0 +1,174 @@
+let 
+doc = 
+
+  [
+    Documentation.Name =  "Get daily Sharepoint metrics", 
+    Documentation.FunctionName = "Sharepoint.Metrics.Detail",
+    Documentation.Description = "Retrieves the  analytics for every page for the last 90 days (viewers and views), ignoring any omittes subsites. Ensure you modify the Entra Credentials and domain to suit your specific requirements.", 
+    Documentation.Examples = {
+          [
+            Description = "Retrieve metrics for all pages from the main site and all subsites",
+            Code = "FunctionName( ""/sites/MainSite"")",
+            Result = "Retrieves the daily metrics for all pages of the main site and subsites"
+          ],
+          [
+            Description = "Retrieve metrics for all pages from the main site and omitting selected subsites",
+            Code = "FunctionName( ""/sites/MainSite"",{""/sites/MainSite/SubSiteA"",""/sites/MainSite/SubSiteB""})",
+            Result = "Retrieves the daily metrics for all pages of the main site and subsites bar SubSiteA and SubSiteB"
+          ]
+        }
+    
+  ],
+
+fn = (mainsite as text, optional ignoreSites as list)=> 
+let
+    //Entra Credentials
+    tenantId = "<yourTenantId>",
+    clientId = "<yourClientId>",
+    clientSecret = "<yourClientSecret>",
+
+    //The main domain and site we want to get the subsites from
+    domain = "<yourMainDomain>", //e.g. "yourdomain.sharepoint.com"
+    
+    ignoreSites = if ignoreSites = null then {} else ignoreSites,
+    // Make the POST request to get the access token. The credentials for the Microsoft Entra app are here, but we might want to move them into e.g. a key vault or similar.
+        accessToken = 
+        Json.Document(
+            Web.Contents(
+                "https://login.microsoftonline.com/" , 
+                [   Headers = [
+                    #"Content-Type" = "application/x-www-form-urlencoded"],
+                RelativePath = tenantId & "/oauth2/v2.0/token",
+                    Content = Text.ToBinary(
+                        "grant_type=client_credentials" &
+                        "&client_id=" & clientId &
+                        "&client_secret=" & clientSecret &
+                        "&scope=https://graph.microsoft.com/.default"
+                    )
+                ]
+            )
+        )[access_token],    
+
+    //Retrieve the unique site ID for the main site
+    GetSiteId = 
+            Json.Document( 
+                Web.Contents( 
+                    "https://graph.microsoft.com/v1.0/", 
+                    [Headers=[Authorization = "Bearer " & accessToken],
+                    RelativePath = "sites/"&domain&":"&Text.Lower(mainsite)] 
+                ) 
+            )[id], 
+
+    //Retrieve the subsites of the main site
+    GetSubSites =    
+      List.ReplaceValue(       
+        Table.ExpandRecordColumn(
+            Table.FromList(
+                Json.Document( 
+                    Web.Contents( 
+                        "https://graph.microsoft.com/v1.0/sites/", 
+                        [Headers=[Authorization = "Bearer " & accessToken],
+                        RelativePath = GetSiteId&"/sites"] 
+                    ) 
+                )[value],
+                Splitter.SplitByNothing(), null, null, ExtraValues.Error
+            ), 
+            "Column1", {"id", "name", "webUrl", "displayName"}
+        )[webUrl],"https://"&domain,"",Replacer.ReplaceText), 
+
+    //Create a list of all sites and subsites, and remove the subsites we want to ignore
+    siteinfo =List.RemoveItems( List.Combine({{mainsite},GetSubSites}),ignoreSites),    
+
+    GetData =  (sitePath as text) => let 
+    
+    //Get the site id for the (sub)site called in the loop - sitePath is the nest item in the list containing the name of the subsite
+    GetSiteId = 
+        Json.Document( 
+            Web.Contents( 
+                 "https://graph.microsoft.com/v1.0/sites/"&domain, 
+                [Headers=[Authorization = "Bearer " & accessToken],
+                    RelativePath = ":"&Text.Lower(sitePath)] 
+            ) 
+        )[id], 
+    
+    //Getting the unique id if the Site Pages list for the specific (sub)site. Site Pages contains the page info for the specific site
+    GetSitePagesId = 
+        Json.Document( 
+            Web.Contents( 
+                "https://graph.microsoft.com/v1.0/sites/", 
+                        [Headers=[Authorization = "Bearer " & accessToken],
+                        RelativePath = GetSiteId&"/lists?$filter=displayName eq 'Site Pages'"] 
+            ) 
+        )[value]{0}[id], 
+
+    //Getting all pages of the subsite that are available in the sharepoint list "Site Pages" for that (sub)site
+    GetPages = 
+        Table.ExpandRecordColumn( 
+            Table.FromList( 
+                Json.Document( 
+                    Web.Contents( 
+                        "https://graph.microsoft.com/v1.0/sites/", 
+                        [Headers=[Authorization = "Bearer " & accessToken],
+                        RelativePath = GetSiteId&"/pages/microsoft.graph.sitePage"] 
+                    ) 
+                )[value], 
+                Splitter.SplitByNothing(), null, null, ExtraValues.Error 
+            ), 
+            "Column1", {"id", "name", "webUrl", "title"} 
+        ), 
+
+    //For each page, get the number of views and viewers for a 90 day interval (mx for the api)    
+    AnalyticsInterval = 
+        Table.AddColumn( 
+            GetPages,"analytics", 
+            each Json.Document( 
+                Web.Contents( 
+                    "https://graph.microsoft.com/v1.0/sites/", 
+                    [
+                        Headers=[Authorization = "Bearer " & accessToken],
+                        RelativePath = GetSiteId&"/lists/"&GetSitePagesId&"/items/"&[id]&
+                                        "/getActivitiesByInterval("&
+                                                    "startDateTime='"&Date.ToText(Date.AddDays(DateTime.Date(DateTime.LocalNow()),-90), "yyyy-MM-dd")&"',"&
+                                                    "endDateTime='"&Date.ToText(DateTime.Date(DateTime.LocalNow()), "yyyy-MM-dd")&"',"&
+                                                    "interval='day'"&
+                                        ")"
+                    ] 
+                ) 
+            ) 
+        ),
+        
+        //Add the subsite name as a column, so we can filter on that
+        AddLocation = Table.AddColumn(AnalyticsInterval,"Location", each Replacer.ReplaceText(Replacer.ReplaceText(sitePath,"/sites/",""),"marketplace/",""))
+    
+    in AddLocation,
+    
+    //Call the above loop function
+    AllSiteData = List.Transform(siteinfo, each GetData(_)),
+
+    //The above loop creates a list of tables (one for each site), so we need to combine them
+    CombinedData = Table.Combine(AllSiteData),
+    
+    //Each analytics day is combined in a list within a column for the subsites, so we need to expand that column
+    ExpandInfo = 
+        Table.ExpandRecordColumn(
+            Table.ExpandRecordColumn(
+                Table.ExpandListColumn(
+                    Table.ExpandRecordColumn(CombinedData, "analytics", {"value"})
+                    , "value"
+                ), "value", { "startDateTime", "endDateTime", "access"}
+            ), "access", {"actionCount", "actorCount"}, {"Views per Day", "Viewers per Day"}
+        ),
+    
+    //Convert column types to dates, numbers, etc
+    ChangeTypes = 
+        Table.TransformColumnTypes(
+            Table.TransformColumnTypes(
+                ExpandInfo,{{"startDateTime", type datetime}, {"endDateTime", type datetime}}
+            ),
+            {{"startDateTime", type date}, {"endDateTime", type date}, {"Views per Day", Int64.Type}, {"Viewers per Day", Int64.Type}}
+        )
+    in ChangeTypes
+
+
+ in 
+Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))

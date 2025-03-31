@@ -1,0 +1,36 @@
+let 
+doc = 
+
+  [
+    Documentation.Name =  "Get Jira Comments By Key", 
+    Documentation.FunctionName = "Jira.GetCommentsByKey",
+    Documentation.Description = "Get all comments for a specific key. the renderedBody provides HTML, while body uses the ADF format. the key column must contain a single key.  Ensure you modify your domain(s) to suit your specific requirements. ", 
+    Documentation.Examples = {
+          [
+            Description = "Get Comments",
+            Code = "FunctionName(Source, ""DomainNameColumn"", ""keyColumn"")",
+            Result = "A new column is added, called Comments with records that can be expanded further."
+          ]
+        }
+    
+  ],
+
+fn = 
+
+(SourceTable as table, Domains as text,keys as text)=> 
+        Table.ExpandListColumn( 
+            Table.ExpandRecordColumn(
+                Table.AddColumn(SourceTable, "comments", each if Record.Field(_,Domains) = "<domain>" then  
+                    Json.Document(
+                        Web.Contents(
+                            "<domain>",
+                            [RelativePath = "rest/api/3/issue/" & Record.Field(_,keys) &"/comment",Query=[expand="renderedBody"]]
+                        )
+                    )
+                    else null
+                ), "comments", {"comments"}
+            ), "comments"
+        )
+
+ in 
+Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))

@@ -1,0 +1,49 @@
+let 
+doc = 
+
+  [
+    Documentation.Name =  "Get Jira ChangeLog By Key", 
+    Documentation.FunctionName = "Jira.GetChangeLogByKey",
+    Documentation.Description = "Get all changes made to record for a specific key. The key column must contain a single key. Ensure you modify your domain(s) to suit your specific requirements. ", 
+    Documentation.Examples = {
+          [
+            Description = "Get Comments",
+            Code = "FunctionName(Source, ""DomainNameColumn"", ""keyColumn"")",
+            Result = "New columns are added with an audit log of all changes over time."
+          ]
+        }
+    
+  ],
+
+fn = 
+
+(SourceTable as table, Domains as text,keys as text)=> 
+               Table.ExpandRecordColumn(
+                 Table.ExpandRecordColumn(
+                  Table.ExpandListColumn(
+                    Table.ExpandRecordColumn(
+                      Table.ExpandListColumn(
+                        Table.ExpandRecordColumn(
+                        Table.AddColumn(SourceTable, "changelog", each if Record.Field(_,Domains) = "<domain>" then  
+                          Json.Document(
+                            Web.Contents(
+                                "<domain>",
+                                [RelativePath = "rest/api/3/issue/" & Record.Field(_,keys) &"/changelog"]
+                            )
+                          )
+                          else null
+                        ),
+                        "changelog", {"values"}, {"changelog.values"}
+                      ),
+                      "changelog.values"
+                    ), 
+                    "changelog.values", {"author", "created", "items"}, {"changelog.author", "changelog.created", "changelog.items"}
+                  ), 
+                  "changelog.items"
+                ), 
+                "changelog.items", {"field", "fromString", "toString"}, {"changelog.ChangedField", "changelog.changedFrom", "changelog.changedTo"}
+              ), 
+              "changelog.author", {"emailAddress", "displayName"}, {"changelog.authorEmailAddress", "changelog.authorName"}
+            )
+ in 
+Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))

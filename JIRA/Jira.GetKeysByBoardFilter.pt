@@ -1,0 +1,57 @@
+let 
+doc = 
+  [
+    Documentation.Api = "https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-get",
+    Documentation.Name =  "Get JIRA Keys by Board Filter", 
+    Documentation.FunctionName =  "Jira.GetKeysByBoardFilter", 
+    Documentation.Description = "This function is a jira specific pattern, which retrieves the JIRA keys for specific board filters. Ensure you modify your domain(s) to suit your specific requirements.", 
+    Documentation.Examples = {
+          [
+            Description = "Retrieve Filter Ids with specified column name",
+            Code = "FunctionName(Source, ""DomainColumn"",""FilterColumn"",""Key"")",
+            Result = "A new column 'Key' is added with the keys for value combination the specified columns"
+          ],
+          [
+            Description = "Retrieve Filter Ids with default column name",
+            Code = "FunctionName(Source, ""DomainColumn"",""FilterColumn"")",
+            Result = "A new column 'keys' (default column name) is added with the keys for value combination the specified columns"
+          ]
+	}
+  ],
+fn = (previousStep as table, Domains as text, Filters as text, optional NewKeyColumnName as nullable text)=>
+let 
+GetKeys = (Domain as text, jql as text) =>
+        let
+            BaseUrl = 
+            if Domain = "<domain>" then "<domain>" else "<domain>",
+            FetchPage = (startAt as number) =>
+                Json.Document(Web.Contents(BaseUrl, [
+                    RelativePath = "/rest/api/3/search/",
+                    Query = [
+                        jql = jql,
+                        fields = "key",
+                        maxResults = "100",
+                        startAt = Text.From(startAt)
+                    ]
+                ])),
+            GetAllPages = List.Generate(
+                () => [Page = FetchPage(0), StartAt = 0],
+                each List.Count([Page][issues]) > 0,
+                each [Page = FetchPage([StartAt] + 100), StartAt = [StartAt] + 100],
+                each [Page][issues]
+            ),
+            AllPages = List.Combine(GetAllPages)
+        in
+            Table.FromList(AllPages, Splitter.SplitByNothing(), {"Column1"}),
+
+NewKeyColumnName = if NewKeyColumnName = null then "keys" else NewKeyColumnName in 
+  let GetKeysFromApi = 
+        Table.ExpandRecordColumn(
+            Table.ExpandTableColumn(
+                Table.AddColumn(previousStep, NewKeyColumnName, each
+                    GetKeys(Text.From(Record.Field(_, Domains)), Text.From(Record.Field(_, Filters)))
+                    
+                ), NewKeyColumnName, {"Column1"}), "Column1", {"key"}, {NewKeyColumnName})
+    in GetKeysFromApi
+ in 
+Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))
