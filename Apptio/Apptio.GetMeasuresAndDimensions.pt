@@ -1,0 +1,65 @@
+let 
+    doc = [
+        Documentation.Name = "Get the measures and dimensions in Apptio", 
+        Documentation.FunctionName = "Apptio.GetMeasuresAndDimensions",
+        Documentation.Description = "Get the measure and dimension information in Apptio.", 
+        Documentation.Examples = {
+            [
+                Description = "Retrieve the measures and dimensions",
+                Code = "FunctionName()",
+                Result = "Returns a information for the measures and dimensionss, like name, type, and groupings."
+            ]
+        }
+    ],
+    fn = ()=>
+let
+    /*
+    With Cloudability being available to users in the EU and the APAC region now:
+    - The API endpoint for new EU instance would be: https://api-eu.cloudability.com
+    - The API endpoint for new APAC instance would be: https://api-au.cloudability.com
+    - The API endpoint for new ME instance is: https://api-me.cloudability.com
+    - Or you could try: https://api.cloudability.com (used in this example) 
+*/
+    api = "https://api.cloudability.com/v3",
+    GetDimensionsAndMeasures = 
+        Table.FromList(
+            Json.Document(Web.Contents(api,[RelativePath="/reporting/cost/measures"])), 
+            Splitter.SplitByNothing(), null, null, ExtraValues.Error
+        ),
+    
+    GetResultColNames = List.Distinct(
+        List.Combine(
+            List.Transform(Table.ToRecords(GetDimensionsAndMeasures), each Record.FieldNames(Record.Field(_, "Column1")))
+        )
+    ),
+
+    ExpandRecords = Table.ExpandRecordColumn(GetDimensionsAndMeasures,"Column1",GetResultColNames),
+
+    GetGroupColNames = 
+        List.Distinct(
+            List.Combine(
+                List.Transform(Table.ToRecords(ExpandRecords), each Record.FieldNames(Record.Field(_, "group")))
+            )
+        ),
+
+    ExpandGroup = 
+        Table.ExpandRecordColumn(
+            ExpandRecords,"group",GetGroupColNames, List.Transform(GetGroupColNames, each "group." & _)
+        ),
+
+    GetSubGroupColNames = 
+        List.Distinct(
+            List.Combine(
+                List.Transform(Table.ToRecords(ExpandGroup), each Record.FieldNames(Record.Field(_, "sub_group")))
+            )
+        ),
+
+    ExpandSubGroup = 
+        Table.ExpandRecordColumn(
+            ExpandGroup,"sub_group",GetSubGroupColNames, List.Transform(GetSubGroupColNames, each "sub_group." & _)
+        )          
+
+in
+    ExpandSubGroup
+in 
+    Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))
