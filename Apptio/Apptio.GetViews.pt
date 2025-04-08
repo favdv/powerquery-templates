@@ -1,0 +1,55 @@
+let 
+    doc = [
+        Documentation.Name = "Get the views you have access to in Apptio", 
+        Documentation.FunctionName = "Apptio.GetViews",
+        Documentation.Description = "Get the view information you have access to in Apptio.", 
+        Documentation.Examples = {
+            [
+                Description = "Retrieve the views",
+                Code = "FunctionName()",
+                Result = "Returns a information for the views, like ID, name, filters applied and ownership information."
+            ]
+        }
+    ],
+    fn = ()=>
+let
+    /*
+    With Cloudability being available to users in the EU and the APAC region now:
+    - The API endpoint for new EU instance would be: https://api-eu.cloudability.com
+    - The API endpoint for new APAC instance would be: https://api-au.cloudability.com
+    - The API endpoint for new ME instance is: https://api-me.cloudability.com
+    - Or you could try: https://api.cloudability.com (used in this example) 
+*/
+    api = "https://api.cloudability.com/v3",
+    Views = 
+        Table.ExpandListColumn(
+            Table.FromRecords({
+                Json.Document(Web.Contents(api,[RelativePath="/views"]))
+            }), "result"
+        ),
+    
+    GetResultColNames = List.Distinct(
+        List.Combine(
+            List.Transform(Table.ToRecords(Views), each Record.FieldNames(Record.Field(_, "result")))
+        )
+    ),
+
+    ExpandResults = Table.ExpandRecordColumn(Views,"result",GetResultColNames),
+    
+    GetFilterColNames = List.Distinct(
+        List.Combine(
+            List.Transform(Table.ToRecords(Table.ExpandListColumn(ExpandResults, "filters")), each Record.FieldNames(Record.Field(_, "filters")))
+        )
+    ),
+
+    ExpandFilters = 
+        Table.ExpandRecordColumn(
+            Table.ExpandListColumn(ExpandResults, "filters"),
+            "filters",GetFilterColNames, List.Transform(GetFilterColNames, each "filters." & _)
+        ),
+
+   ExpandLists = Table.ExpandListColumn( Table.ExpandListColumn(ExpandFilters, "sharedWithUsers"), "derivedUserIds")
+in
+    ExpandLists
+in 
+    Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))
