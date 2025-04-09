@@ -2,7 +2,7 @@ let
     doc = [
         Documentation.Name = "Function Template", 
         Documentation.FunctionName = "Sample.Function",
-        Documentation.Description = "A Template that can be used as a starting point to implement your own functions", 
+        Documentation.Description = "A Template that can be used as a starting point to implement your own functions. Simply paste your function and update the documentation. The Documentation.FunctionName (not a standard field) can be used to reference to the record if the function is retrieved from Githb via PowerQuery", 
         Documentation.Examples = {
             [
                 Description = "...",
@@ -16,6 +16,9 @@ let
             ]
         }
     ],
-    fn = ... //Paste the written function here, leaving "fn =" in place 
+    fn = 
+        
+    //Paste the written function here 
+
 in 
     Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))
