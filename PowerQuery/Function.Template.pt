@@ -16,11 +16,6 @@ let
             ]
         }
     ],
-    fn = (previousStep as table) => 
-        let 
-        
-            Source = "Replace this with your actual function logic"
-        in 
-            Source
+    fn = ... //Paste the written function here
 in 
     Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))
