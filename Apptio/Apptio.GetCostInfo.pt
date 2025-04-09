@@ -88,11 +88,20 @@ let
         Expanded = Table.ExpandRecordColumn(CombinedData, "Column1", ColumnsToExpand),
 
         // Fetch metadata to map labels and types
-        MeasuresTable = Table.ExpandRecordColumn(
+        Measures = 
             Table.FromList(Json.Document(Web.Contents(api, [RelativePath = "/reporting/cost/measures"])), 
                 Splitter.SplitByNothing(), null, null, ExtraValues.Error),
-            "Column1", {"name", "label", "data_type"}
-        ),
+
+        MeasuresFields =  
+            List.Distinct(
+                List.Combine(
+                    List.Transform(Table.ToRecords(Measures), each Record.FieldNames(Record.Field(_, "Column1")))
+                )
+            ),
+    
+        MeasuresTable = Table.ExpandRecordColumn(Measures,"Column1",MeasuresFields),
+        
+
         FilteredMeasuresTable = Table.SelectRows(MeasuresTable, each List.Contains(ColumnsToExpand, [name])),
         OldNames = FilteredMeasuresTable[name],
         NewNames = FilteredMeasuresTable[label],
@@ -112,8 +121,11 @@ let
         ColumnTypeTransformations = List.Zip({TypeTransformations[label], TypeTransformations[Type]}),
 
         // Apply type transformations and date conversions
-        Typed = Table.TransformColumnTypes(Renamed, ColumnTypeTransformations),
-        Final = Table.TransformColumnTypes(Typed, {{"Current Start Date", type date}, {"Current End Date", type date}})
+        Final = 
+            Table.TransformColumnTypes(
+                Table.TransformColumnTypes(Renamed, ColumnTypeTransformations), 
+                {{"Current Start Date", type date}, {"Current End Date", type date}}
+            )
     in
         Final 
 
