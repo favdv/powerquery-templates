@@ -1,0 +1,121 @@
+let 
+    doc = [
+        Documentation.Name = "Get Cost Info from Apprio", 
+        Documentation.FunctionName = "Apptio.GetCostInfo",
+        Documentation.Description = "Retrieve Apptio data for the date range, measures, dimensions and views with filters applied. The function automatically converts the measure and dimension IDs to the labels. Separate functions are available for measures, dimensions and view information.", 
+        Documentation.Examples = {
+            [
+                Description = "Retrieve amortised cost from 2 views from a specific start date until today (inclusive) by vendor, vendor_account_name and service_name filtered on specific criteria.",
+                Code = "FunctionName(""total_amortized_cost"",""vendor,vendor_account_name,service_name"",Date.FromText(""2024-03-01""),null,{{""123000"", ""vendor_account_name=@features""}, {""124000"", ""service_name[]=Virtual Network,microsoft.app""}})",
+                Result = "Returns cost, vendor info and service name from views 123000, filtered on account names containing the word `features`, and 124000, filtered on services Virtual network and microsoft.app for dates between 2024-03-01 until today (inclusive)."
+            ],
+            [
+                Description = "Retrieve the amortised cost info from your default view for the last 10 days (rolling) by vendor, vendor_account_name and service_name.",
+                Code = "FunctionName(""total_amortized_cost"",""vendor,vendor_account_name,service_name"",Date.AddDays(Date.From(DateTime.LocalNow()),-10))",
+                Result = "Returns cost, vendor info and service name from the default view for the last 10 days until today (inclusive)."
+            ],
+            [
+                Description = "Retrieve the amortised cost info from view 123000 for the previous week (rolling) by vendor.",
+                Code = "FunctionName(""total_amortized_cost"",""vendor"",Date.AddWeeks(Date.From(DateTime.LocalNow()),-2),Date.AddWeeks(Date.From(DateTime.LocalNow()),-1),{{""123000"",null}})",
+                Result = "Returns cost, vendor info and service name from the specified view for the previous week ."
+            ]
+        }
+    ],
+    fn = (metrics as text,dimensions as text,startDate as date,optional endDate as nullable date,optional viewsAndFilters as nullable list) as table =>
+    let
+        // Set default end date if not provided
+        actualEndDate = if endDate = null then Date.From(DateTime.LocalNow()) else endDate,
+
+        // Define API endpoint
+        api = "https://api.cloudability.com/v3",
+
+        // Create a calendar table from startDate to actualEndDate
+        calendar = Table.TransformColumns(
+            Table.FromList(
+                List.Dates(startDate, Duration.Days(actualEndDate - startDate) + 1, #duration(1, 0, 0, 0)),
+                Splitter.SplitByNothing(), {"Date"}, null, ExtraValues.Error
+            ),
+            {{"Date", each Date.From(_), type date}}
+        ),
+
+        // Helper function to fetch data per date range and view/filter combo
+        GetData = (startdate as date, enddate as date, filter as nullable text, view_id as nullable text) as table =>
+            let
+                StartDateString = Date.ToText(startdate, "yyyy-MM-dd"),
+                EndDateString = Date.ToText(enddate, "yyyy-MM-dd"),
+                QueryParameters = [
+                    start_date = StartDateString,
+                    end_date = EndDateString,
+                    dimensions = dimensions,
+                    metrics = metrics
+                ],
+                QueryWithViewId = if view_id <> null then Record.AddField(QueryParameters, "view_id", view_id) else QueryParameters,
+                QueryWithFilters = if filter <> null then Record.AddField(QueryWithViewId, "filters", filter) else QueryWithViewId,
+                Source = Json.Document(Web.Contents(api, [
+                    RelativePath = "/reporting/cost/run",
+                    Query = QueryWithFilters
+                ])),
+                Results = Source[results],
+                Data = Table.FromList(Results, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+                DataWithMeta = Table.AddColumn(
+                    Table.AddColumn(
+                        Table.AddColumn(Data, "Current Start Date", each StartDateString),
+                        "Current End Date", each EndDateString),
+                    "view_id", each view_id)
+            in
+                DataWithMeta,
+
+        // Generate date ranges
+        DatePairs = Table.AddColumn(calendar, "StartDate", each Date.AddDays([Date], 0)),
+
+        // Normalize viewsAndFilters list
+        AdjustedViewsFilters = if viewsAndFilters = null then {{null, null}} else viewsAndFilters,
+
+        // Fetch data for each view/filter combination
+        GetAllData = (startdate as date, enddate as date, viewFilters as list) as table =>
+            let
+                DataTables = List.Transform(viewFilters, each GetData(startdate, enddate, _{1}, _{0})),
+                Combined = Table.Combine(DataTables)
+            in
+                Combined,
+
+        // Apply GetAllData across date ranges
+        Data = Table.AddColumn(DatePairs, "Data", each GetAllData([StartDate], [Date], AdjustedViewsFilters)),
+        CombinedData = Table.Combine(Data[Data]),
+
+        // Extract fields
+        ColumnsToExpand = List.Combine({Text.Split(metrics, ","), Text.Split(dimensions, ",")}),
+        Expanded = Table.ExpandRecordColumn(CombinedData, "Column1", ColumnsToExpand),
+
+        // Fetch metadata to map labels and types
+        MeasuresTable = Table.ExpandRecordColumn(
+            Table.FromList(Json.Document(Web.Contents(api, [RelativePath = "/reporting/cost/measures"])), 
+                Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+            "Column1", {"name", "label", "data_type"}
+        ),
+        FilteredMeasuresTable = Table.SelectRows(MeasuresTable, each List.Contains(ColumnsToExpand, [name])),
+        OldNames = FilteredMeasuresTable[name],
+        NewNames = FilteredMeasuresTable[label],
+        Renamed = Table.RenameColumns(Expanded, List.Zip({OldNames, NewNames})),
+
+        // Data type mapping
+        TypeMapping = [
+            float = type number,
+            integer = Int64.Type,
+            string = type text,
+            date = type date,
+            datetime = type datetime,
+            currency = Currency.Type,
+            percentage = Percentage.Type
+        ],
+        TypeTransformations = Table.AddColumn(FilteredMeasuresTable, "Type", each Record.Field(TypeMapping, [data_type])),
+        ColumnTypeTransformations = List.Zip({TypeTransformations[label], TypeTransformations[Type]}),
+
+        // Apply type transformations and date conversions
+        Typed = Table.TransformColumnTypes(Renamed, ColumnTypeTransformations),
+        Final = Table.TransformColumnTypes(Typed, {{"Current Start Date", type date}, {"Current End Date", type date}})
+    in
+        Final 
+
+in 
+    Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))
