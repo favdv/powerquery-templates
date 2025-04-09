@@ -16,6 +16,6 @@ let
             ]
         }
     ],
-    fn = ... //Paste the written function here
+    fn = ... //Paste the written function here, leaving "fn =" in place 
 in 
     Value.ReplaceType(fn, Value.ReplaceMetadata(Value.Type(fn), doc))
