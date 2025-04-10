@@ -1,6 +1,6 @@
 let 
     doc = [
-        Documentation.Name = "Get Cost Info from Apprio", 
+        Documentation.Name = "Get Cost Info from Apptio", 
         Documentation.FunctionName = "Apptio.GetCostInfo",
         Documentation.Description = "Retrieve Apptio data for the date range, measures, dimensions and views with filters applied. The function automatically converts the measure and dimension IDs to the labels. Separate functions are available for measures, dimensions and view information.", 
         Documentation.Examples = {
