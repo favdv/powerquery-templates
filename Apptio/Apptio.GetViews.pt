@@ -13,13 +13,13 @@ let
     ],
     fn = ()=>
 let
-    /*
-    With Cloudability being available to users in the EU and the APAC region now:
-    - The API endpoint for new EU instance would be: https://api-eu.cloudability.com
-    - The API endpoint for new APAC instance would be: https://api-au.cloudability.com
-    - The API endpoint for new ME instance is: https://api-me.cloudability.com
-    - Or you could try: https://api.cloudability.com (used in this example) 
-*/
+   /*  Define API endpoint
+            - The API endpoint for EU instances is: https://api-eu.cloudability.com
+            - The API endpoint for APAC instances: https://api-au.cloudability.com
+            - The API endpoint for ME instances is: https://api-me.cloudability.com
+            - The API endpoint for other regions is: https://api.cloudability.com 
+        */
+
     api = "https://api.cloudability.com/v3",
     Views = 
         Table.ExpandListColumn(
