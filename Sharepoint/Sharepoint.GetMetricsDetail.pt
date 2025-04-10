@@ -20,7 +20,7 @@ doc =
     
   ],
 
-fn = (mainsite as text, optional ignoreSites as list)=> 
+fn = (mainsite as text, optional ignoreSites as nullable list)=> 
 let
     //Entra Credentials
     tenantId = "<yourTenantId>",
