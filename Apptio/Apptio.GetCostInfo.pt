@@ -27,6 +27,13 @@ let
         actualEndDate = if endDate = null then Date.From(DateTime.LocalNow()) else endDate,
 
         // Define API endpoint
+        /*
+            With Cloudability being available to users in the EU and the APAC region now:
+            - The API endpoint for new EU instance would be: https://api-eu.cloudability.com
+            - The API endpoint for new APAC instance would be: https://api-au.cloudability.com
+            - The API endpoint for new ME instance is: https://api-me.cloudability.com
+            - Or you could try: https://api.cloudability.com (used in this example) 
+        */
         api = "https://api.cloudability.com/v3",
 
         // Create a calendar table from startDate to actualEndDate
