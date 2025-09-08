@@ -26,7 +26,7 @@ GetKeys = (Domain as text, jql as text) =>
             if Domain = "<domain>" then "<domain>" else "<domain>",
             FetchPage = (startAt as number) =>
                 Json.Document(Web.Contents(BaseUrl, [
-                    RelativePath = "/rest/api/3/search/",
+                    RelativePath = "/rest/api/3/search/jql",
                     Query = [
                         jql = jql,
                         fields = "key",
