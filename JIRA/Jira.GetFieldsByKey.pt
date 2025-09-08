@@ -29,7 +29,7 @@ Table.ExpandRecordColumn(
                         Web.Contents(
                             "<domain>",
                             [
-                                RelativePath = "rest/api/3/search/",
+                                RelativePath = "rest/api/3/search/jql",
                                 Query = [
                                     jql="key IN (" & Record.Field(_,keys) &")", 
                                     fields = Text.Combine( fieldsToRetrieve,","),
